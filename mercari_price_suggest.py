@@ -7,246 +7,261 @@ Original file is located at
     https://colab.research.google.com/drive/1PmemBw9XWZrguqUWG8plkz0ll_dw8zPW
 """
 
-!pip install kaggle
 
-from google.colab import files
-files.upload()
 
-import os
-import shutil
+def main() -> None:
 
-os.makedirs("/root/.kaggle", exist_ok=True)
-shutil.move("kaggle.json", "/root/.kaggle")
-os.chmod("/root/.kaggle/kaggle.json", 600)
+    !pip install kaggle
 
-!kaggle competitions download -c mercari-price-suggestion-challenge
+    from google.colab import files
+    files.upload()
 
-!unzip mercari-price-suggestion-challenge.zip -d ./mercari_data
+    """# importing neccesary libraries"""
+    import os
+    import shutil
 
-!cd mercari_data
-!ls
+    import numpy as np
+    import pandas as pd
 
-!apt-get install -y p7zip-full
+    import seaborn as sns
+    import matplotlib.pyplot as plt
 
-!7z e ./mercari_data/train.tsv.7z -o./mercari_data/
-!7z e ./mercari_data/test.tsv.7z -o./mercari_data/
+    import gc
 
-!unzip ./mercari_data/sample_submission_stg2.csv.zip -d ./mercari_data/
-!unzip ./mercari_data/test_stg2.tsv.zip -d ./mercari_data/
+    from sklearn.linear_model import Ridge, LogisticRegression
+    from sklearn.model_selection import train_test_split, cross_val_score
+    from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+    from sklearn.preprocessing import LabelBinarizer, OneHotEncoder
+    from sklearn.metrics import mean_squared_error
+    from sklearn import preprocessing
 
-!ls -lh ./mercari_data
+    from lightgbm import LGBMRegressor
+    from scipy.sparse import hstack
 
-!pwd
+    os.makedirs("/root/.kaggle", exist_ok=True)
+    shutil.move("kaggle.json", "/root/.kaggle")
+    os.chmod("/root/.kaggle/kaggle.json", 600)
 
-!ls
+    !kaggle competitions download -c mercari-price-suggestion-challenge
 
-# Commented out IPython magic to ensure Python compatibility.
-# %cd ./mercari_data
-!pwd  # Show the current working directory
+    !unzip mercari-price-suggestion-challenge.zip -d ./mercari_data
 
-!ls
+    !cd mercari_data
+    !ls
 
-import numpy as np
-import pandas as pd
+    !apt-get install -y p7zip-full
 
-train_data = pd.read_csv('train.tsv', sep = '\t')
+    !7z e ./mercari_data/train.tsv.7z -o./mercari_data/
+    !7z e ./mercari_data/test.tsv.7z -o./mercari_data/
 
-test_data = pd.read_csv('test.tsv', sep = '\t')
+    !unzip ./mercari_data/sample_submission_stg2.csv.zip -d ./mercari_data/
+    !unzip ./mercari_data/test_stg2.tsv.zip -d ./mercari_data/
 
+    !ls -lh ./mercari_data
 
+    !pwd
 
-"""# EDA"""
+    !ls
 
-train_data.head()
+    # Commented out IPython magic to ensure Python compatibility.
+    # %cd ./mercari_data
+    !pwd  # Show the current working directory
 
-test_data.head()
+    !ls
 
-train_data.info()
 
-y = train_data['price']
 
-y
+    train_data = pd.read_csv('train.tsv', sep = '\t')
 
-y.describe()
+    test_data = pd.read_csv('test.tsv', sep = '\t')
 
-import seaborn as sns
-import matplotlib.pyplot as plt
 
-sns.histplot(y)
-plt.show()
 
-"""## since data is left skewed, so we have to do log transformation to make it normal distribution form
+    """# EDA"""
 
-# Data Cleaning and prepration
-"""
+    train_data.head()
 
-y_log = np.log1p(y)
+    test_data.head()
 
-sns.histplot(y_log)
-plt.show()
+    train_data.info()
 
-train_data['price'] = np.log1p(train_data['price'])
-train_data.head()
+    y = train_data['price']
 
-"""##  since there are 3 category written in category_name section, so we can divide these into 3 coloumns.."""
+    y
 
-def split_category(category_name: str) -> list[str]:
-  try:
-    return category_name.split('/')
-  except:
-    return ['NULL', 'NULL', 'NULL']
+    y.describe()
 
-category_1 = []
-category_2 = []
-category_3 = []
-"""
-    just for debugging..
-    a = split_category(train_data['category_name'][1])
-    print(a[0])
-"""
-for i in range(train_data.shape[0]):
-    temp = split_category(train_data['category_name'][i])
-    category_1.append(temp[0])
-    category_2.append(temp[1])
-    category_3.append(temp[2])
 
-train_data['category_1'] = category_1
-train_data['category_2'] = category_2
-train_data['category_3'] = category_3
 
-"""## checking if there is null value in data and if there is then replacing with string value.."""
+    sns.histplot(y)
+    plt.show()
 
-print('1st Category :', train_data['category_1'].value_counts())
-print('2nd Category :', train_data['category_2'].nunique())
-print('3rd Category :', train_data['category_3'].nunique())
+    """## since data is left skewed, so we have to do log transformation to make it normal distribution form
 
-train_data.isnull().sum()
+    # Data Cleaning and prepration
+    """
 
-train_data['category_name'] = train_data['category_name'].fillna('NULL')
-train_data['brand_name'] = train_data['brand_name'].fillna('NULL')
-train_data['item_description'] = train_data['item_description'].fillna('NULL')
+    y_log = np.log1p(y)
 
-train_data.isnull().sum()
+    sns.histplot(y_log)
+    plt.show()
 
-"""## now doing same thing for test data"""
+    train_data['price'] = np.log1p(train_data['price'])
+    train_data.head()
 
-category_1_test = []
-category_2_test = []
-category_3_test = []
+    """##  since there are 3 category written in category_name section, so we can divide these into 3 coloumns.."""
 
-for i in range(test_data.shape[0]):
-    temp = split_category(test_data['category_name'][i])
-    category_1_test.append(temp[0])
-    category_2_test.append(temp[1])
-    category_3_test.append(temp[2])
-test_data['category_1'] = category_1_test
-test_data['category_2'] = category_2_test
-test_data['category_3'] = category_3_test
+    def split_category(category_name: str) -> list[str]:
+    try:
+        return category_name.split('/')
+    except:
+        return ['NULL', 'NULL', 'NULL']
 
-print('1st Category :', test_data['category_1'].value_counts())
-print('2nd Category :', test_data['category_2'].nunique())
-print('3rd Category :', test_data['category_3'].nunique())
+    category_1 = []
+    category_2 = []
+    category_3 = []
+    """
+        just for debugging..
+        a = split_category(train_data['category_name'][1])
+        print(a[0])
+    """
+    for i in range(train_data.shape[0]):
+        temp = split_category(train_data['category_name'][i])
+        category_1.append(temp[0])
+        category_2.append(temp[1])
+        category_3.append(temp[2])
 
-test_data.isnull().sum()
+    train_data['category_1'] = category_1
+    train_data['category_2'] = category_2
+    train_data['category_3'] = category_3
 
-test_data['category_name'] = test_data['category_name'].fillna('NULL')
-test_data['brand_name'] = test_data['brand_name'].fillna('NULL')
+    """## checking if there is null value in data and if there is then replacing with string value.."""
 
-test_data.isnull().sum()
+    print('1st Category :', train_data['category_1'].value_counts())
+    print('2nd Category :', train_data['category_2'].nunique())
+    print('3rd Category :', train_data['category_3'].nunique())
 
-"""# Feature Encoding and vectorization
+    train_data.isnull().sum()
 
-## combining training and testing dataset
-"""
+    train_data['category_name'] = train_data['category_name'].fillna('NULL')
+    train_data['brand_name'] = train_data['brand_name'].fillna('NULL')
+    train_data['item_description'] = train_data['item_description'].fillna('NULL')
 
-train_data_target = train_data['price']
-train_data.drop('price', axis = 1, inplace = True)
+    train_data.isnull().sum()
 
-mercari_df = pd.concat([train_data, test_data], axis = 0).reset_index(drop = True)
-mercari_df.head()
+    """## now doing same thing for test data"""
 
-"""## since train_id and test_id are useless ,so we can remove it."""
+    category_1_test = []
+    category_2_test = []
+    category_3_test = []
 
-mercari_df = mercari_df.drop(['train_id', 'test_id'], axis = 1)
+    for i in range(test_data.shape[0]):
+        temp = split_category(test_data['category_name'][i])
+        category_1_test.append(temp[0])
+        category_2_test.append(temp[1])
+        category_3_test.append(temp[2])
+    test_data['category_1'] = category_1_test
+    test_data['category_2'] = category_2_test
+    test_data['category_3'] = category_3_test
 
-mercari_df
+    print('1st Category :', test_data['category_1'].value_counts())
+    print('2nd Category :', test_data['category_2'].nunique())
+    print('3rd Category :', test_data['category_3'].nunique())
 
-# for memory cleaning
-import gc
-gc.collect()
+    test_data.isnull().sum()
 
-"""# importing neccesary libraries"""
+    test_data['category_name'] = test_data['category_name'].fillna('NULL')
+    test_data['brand_name'] = test_data['brand_name'].fillna('NULL')
 
-from sklearn.linear_model import Ridge, LogisticRegression
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-from sklearn.preprocessing import LabelBinarizer, OneHotEncoder
-from sklearn.metrics import mean_squared_error
-from sklearn import preprocessing
+    test_data.isnull().sum()
 
-"""## feature vectorization"""
+    """# Feature Encoding and vectorization
 
-cntc_vec = CountVectorizer()
+    ## combining training and testing dataset
+    """
 
-x_name = cntc_vec.fit_transform(mercari_df['name'])
+    train_data_target = train_data['price']
+    train_data.drop('price', axis = 1, inplace = True)
 
-tfidf_descp = TfidfVectorizer(max_features = 50000, ngram_range = (1, 3), stop_words = 'english')
-x_descp = tfidf_descp.fit_transform(mercari_df['item_description'])
+    mercari_df = pd.concat([train_data, test_data], axis = 0).reset_index(drop = True)
+    mercari_df.head()
 
-print('name vectorization shape:', x_name.shape)
-print('descp vectorization shape:', x_descp.shape)
+    """## since train_id and test_id are useless ,so we can remove it."""
 
-"""# feature encoding(using one hot encoder)"""
+    mercari_df = mercari_df.drop(['train_id', 'test_id'], axis = 1)
 
-ohe = OneHotEncoder()
+    mercari_df
 
-x_brand_name = ohe.fit_transform(mercari_df['brand_name'].values.reshape(-1, 1))
-x_category_1 = ohe.fit_transform(mercari_df['category_1'].values.reshape(-1, 1))
-x_category_2 = ohe.fit_transform(mercari_df['category_2'].values.reshape(-1, 1))
-x_category_3 = ohe.fit_transform(mercari_df['category_3'].values.reshape(-1, 1))
-x_item_condition_id = ohe.fit_transform(mercari_df['item_condition_id'].values.reshape(-1, 1))
-x_shipping = ohe.fit_transform(mercari_df['shipping'].values.reshape(-1, 1))
+    # for memory cleaning
 
-print('brand_name shape:', x_brand_name.shape)
-print('category_1 shape:', x_category_1.shape)
-print('category_2 shape:', x_category_2.shape)
-print('category_3 shape:', x_category_3.shape)
-print('item_condition_id shape:', x_item_condition_id.shape)
-print('shipping shape:', x_shipping.shape)
+    gc.collect()
 
-"""##  combining feature vectorized sparse matrix and one hot encoded sparse matrix"""
 
-from lightgbm import LGBMRegressor
-from scipy.sparse import hstack
 
-combined_matrix_train = (x_name[:1482535], x_descp[:1482535], x_brand_name[:1482535], x_item_condition_id[:1482535],
-                         x_shipping[:1482535], x_category_1[:1482535], x_category_2[:1482535], x_category_3[:1482535])
-x_train = hstack(combined_matrix_train).tocsr()
+    """## feature vectorization"""
 
-combined_matrix_test = (x_name[1482535:], x_descp[1482535:], x_brand_name[1482535:], x_item_condition_id[1482535:],
-                        x_shipping[1482535:], x_category_1[1482535:], x_category_2[1482535:], x_category_3[1482535:])
-x_test = hstack(combined_matrix_test).tocsr()
+    cntc_vec = CountVectorizer()
 
-y_train = train_data_target
+    x_name = cntc_vec.fit_transform(mercari_df['name'])
 
-"""## Ridge regression, since here we have to predict price,  using regression and features are multicollinear so ridge regression.."""
+    tfidf_descp = TfidfVectorizer(max_features = 50000, ngram_range = (1, 3), stop_words = 'english')
+    x_descp = tfidf_descp.fit_transform(mercari_df['item_description'])
 
-ridge = Ridge(solver = 'lsqr', fit_intercept = False)
-ridge.fit(x_train, y_train)
-preds = ridge.predict(x_test)
-print(preds)
-print()
+    print('name vectorization shape:', x_name.shape)
+    print('descp vectorization shape:', x_descp.shape)
 
-"""## since we had done log trnasformation, so we are doing it exponnetial transformation so it becomes normal.."""
+    """# feature encoding(using one hot encoder)"""
 
-preds = np.expm1(preds)
+    ohe = OneHotEncoder()
 
-final_submission = pd.DataFrame()
-final_submission['test_id'] = test_data['test_id']
-final_submission['price'] = preds
-final_submission.head()
+    x_brand_name = ohe.fit_transform(mercari_df['brand_name'].values.reshape(-1, 1))
+    x_category_1 = ohe.fit_transform(mercari_df['category_1'].values.reshape(-1, 1))
+    x_category_2 = ohe.fit_transform(mercari_df['category_2'].values.reshape(-1, 1))
+    x_category_3 = ohe.fit_transform(mercari_df['category_3'].values.reshape(-1, 1))
+    x_item_condition_id = ohe.fit_transform(mercari_df['item_condition_id'].values.reshape(-1, 1))
+    x_shipping = ohe.fit_transform(mercari_df['shipping'].values.reshape(-1, 1))
 
-final_submission.to_csv('submission.csv', index = False, header = True)
+    print('brand_name shape:', x_brand_name.shape)
+    print('category_1 shape:', x_category_1.shape)
+    print('category_2 shape:', x_category_2.shape)
+    print('category_3 shape:', x_category_3.shape)
+    print('item_condition_id shape:', x_item_condition_id.shape)
+    print('shipping shape:', x_shipping.shape)
 
-final_submission.shape
+    """##  combining feature vectorized sparse matrix and one hot encoded sparse matrix"""
 
+
+
+    combined_matrix_train = (x_name[:1482535], x_descp[:1482535], x_brand_name[:1482535], x_item_condition_id[:1482535],
+                            x_shipping[:1482535], x_category_1[:1482535], x_category_2[:1482535], x_category_3[:1482535])
+    x_train = hstack(combined_matrix_train).tocsr()
+
+    combined_matrix_test = (x_name[1482535:], x_descp[1482535:], x_brand_name[1482535:], x_item_condition_id[1482535:],
+                            x_shipping[1482535:], x_category_1[1482535:], x_category_2[1482535:], x_category_3[1482535:])
+    x_test = hstack(combined_matrix_test).tocsr()
+
+    y_train = train_data_target
+
+    """## Ridge regression, since here we have to predict price,  using regression and features are multicollinear so ridge regression.."""
+
+    ridge = Ridge(solver = 'lsqr', fit_intercept = False)
+    ridge.fit(x_train, y_train)
+    preds = ridge.predict(x_test)
+    print(preds)
+    print()
+
+    """## since we had done log trnasformation, so we are doing it exponnetial transformation so it becomes normal.."""
+
+    preds = np.expm1(preds)
+
+    final_submission = pd.DataFrame()
+    final_submission['test_id'] = test_data['test_id']
+    final_submission['price'] = preds
+    final_submission.head()
+
+    final_submission.to_csv('submission.csv', index = False, header = True)
+
+    final_submission.shape
+
+if __name__ == "__main__":
+    main()
